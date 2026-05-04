@@ -25,13 +25,23 @@ interface Survey {
   description?: string;
 }
 
-interface ResponseRecord {
+// SurveyResponse.tsx stores answers as JSON blob per respondent:
+// { survey_id, respondent_token, answers: { question_id: answer_value }, metadata: { submitted_at } }
+interface DBResponse {
   id: string;
   survey_id: string;
-  respondent_id: string;
+  respondent_token: string;
+  answers: Record<string, string | string[]>;
+  metadata?: { submitted_at?: string; user_agent?: string };
+  created_at: string;
+}
+
+// Flattened record for analytics processing
+interface FlatAnswer {
+  respondent_token: string;
   question_id: string;
   answer: string | string[];
-  created_at: string;
+  submitted_at: string;
 }
 
 interface AggregatedData {
@@ -53,11 +63,10 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 
 export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose }) => {
   const { user } = useAuth();
-  const [responses, setResponses] = useState<ResponseRecord[]>([]);
+  const [dbResponses, setDbResponses] = useState<DBResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [aiSummary, setAiSummary] = useState<string>('');
   const [aiLoading, setAiLoading] = useState(false);
-  const [selectedQuestion, setSelectedQuestion] = useState<string | null>(null);
   const [expandedRespondent, setExpandedRespondent] = useState<string | null>(null);
   const [drillDownOpen, setDrillDownOpen] = useState(false);
 
@@ -72,14 +81,31 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
       .select('*')
       .eq('survey_id', survey.id)
       .order('created_at', { ascending: false });
-    setResponses(data || []);
+    setDbResponses((data as DBResponse[]) || []);
     setLoading(false);
   };
 
+  // Flatten JSON blob answers into per-question records
+  const flatAnswers = useMemo<FlatAnswer[]>(() => {
+    const result: FlatAnswer[] = [];
+    for (const resp of dbResponses) {
+      const submittedAt = resp.metadata?.submitted_at || resp.created_at;
+      for (const [qid, answer] of Object.entries(resp.answers || {})) {
+        result.push({
+          respondent_token: resp.respondent_token,
+          question_id: qid,
+          answer,
+          submitted_at: submittedAt,
+        });
+      }
+    }
+    return result;
+  }, [dbResponses]);
+
   const aggregated = useMemo<AggregatedData[]>(() => {
     return questions.map((q, idx) => {
-      const qResponses = responses.filter(r => r.question_id === q.id);
-      const total = qResponses.length;
+      const qAnswers = flatAnswers.filter(a => a.question_id === q.id);
+      const total = qAnswers.length;
 
       if (q.type === 'open_ended') {
         return {
@@ -88,18 +114,18 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
           question: q,
           totalResponses: total,
           breakdown: [],
-          openEndedAnswers: qResponses.map(r => String(r.answer)).filter(a => a.trim()),
+          openEndedAnswers: qAnswers.map(a => String(a.answer)).filter(a => a.trim()),
         };
       }
 
       const counts: Record<string, number> = {};
       q.options.forEach(opt => counts[opt] = 0);
 
-      qResponses.forEach(r => {
-        const ans = Array.isArray(r.answer) ? r.answer : [String(r.answer)];
-        ans.forEach(a => {
-          if (counts[a] !== undefined) counts[a]++;
-          else counts[a] = 1;
+      qAnswers.forEach(a => {
+        const ans = Array.isArray(a.answer) ? a.answer : [String(a.answer)];
+        ans.forEach(val => {
+          if (counts[val] !== undefined) counts[val]++;
+          else counts[val] = 1;
         });
       });
 
@@ -120,11 +146,11 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
         openEndedAnswers: [],
       };
     });
-  }, [responses, questions]);
+  }, [flatAnswers, questions]);
 
   const totalRespondents = useMemo(() => {
-    return new Set(responses.map(r => r.respondent_id)).size;
-  }, [responses]);
+    return new Set(dbResponses.map(r => r.respondent_token)).size;
+  }, [dbResponses]);
 
   const generateAiSummary = async () => {
     setAiLoading(true);
@@ -133,7 +159,7 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
         .filter(a => a.question.type === 'open_ended' && a.openEndedAnswers.length > 0)
         .map(a => ({
           question: a.question.prompt,
-          answers: a.openEndedAnswers.slice(0, 50), // Limit for API
+          answers: a.openEndedAnswers.slice(0, 50),
         }));
 
       if (openEndedData.length === 0) {
@@ -161,20 +187,17 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
   };
 
   const exportCsv = () => {
-    const headers = ['Respondent ID', 'Submitted At', ...questions.map((q, i) => `Q${i + 1}: ${q.prompt}`)];
+    const headers = ['Respondent Token', 'Submitted At', ...questions.map((q, i) => `Q${i + 1}: ${q.prompt}`)];
 
-    const respondentGroups = responses.reduce((acc, r) => {
-      if (!acc[r.respondent_id]) acc[r.respondent_id] = {};
-      acc[r.respondent_id][r.question_id] = Array.isArray(r.answer) ? r.answer.join('; ') : r.answer;
-      acc[r.respondent_id]._created_at = r.created_at;
-      return acc;
-    }, {} as Record<string, any>);
-
-    const rows = Object.entries(respondentGroups).map(([respId, answers]) => {
+    const rows = dbResponses.map(resp => {
+      const submittedAt = resp.metadata?.submitted_at || resp.created_at;
       return [
-        respId,
-        answers._created_at,
-        ...questions.map(q => answers[q.id] || ''),
+        resp.respondent_token,
+        submittedAt,
+        ...questions.map(q => {
+          const ans = resp.answers?.[q.id];
+          return Array.isArray(ans) ? ans.join('; ') : (ans || '');
+        }),
       ];
     });
 
@@ -192,8 +215,8 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
     toast({ title: 'CSV exported', description: `${rows.length} responses downloaded.` });
   };
 
-  const getRespondentResponses = (respondentId: string) => {
-    return responses.filter(r => r.respondent_id === respondentId);
+  const getRespondentAnswers = (token: string) => {
+    return dbResponses.find(r => r.respondent_token === token)?.answers || {};
   };
 
   if (loading) {
@@ -218,12 +241,12 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={exportCsv} disabled={responses.length === 0}>
+          <Button variant="outline" onClick={exportCsv} disabled={dbResponses.length === 0}>
             <Download className="w-4 h-4 mr-2" />Export CSV
           </Button>
           <Button 
             onClick={generateAiSummary} 
-            disabled={aiLoading || responses.length === 0}
+            disabled={aiLoading || dbResponses.length === 0}
             className="gradient-primary text-white border-0"
           >
             {aiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Sparkles className="w-4 h-4 mr-2" />AI Summary</>}
@@ -246,7 +269,7 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
             <FileText className="w-4 h-4 text-emerald-500" />
             <span className="text-[10px] uppercase font-condensed tracking-wider text-muted-foreground">Total Answers</span>
           </div>
-          <div className="font-display text-3xl font-bold">{responses.length.toLocaleString()}</div>
+          <div className="font-display text-3xl font-bold">{flatAnswers.length.toLocaleString()}</div>
         </div>
         <div className="glass-card p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -254,7 +277,7 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
             <span className="text-[10px] uppercase font-condensed tracking-wider text-muted-foreground">Completion Rate</span>
           </div>
           <div className="font-display text-3xl font-bold">
-            {totalRespondents > 0 ? Math.round((responses.length / (totalRespondents * questions.length)) * 100) : 0}%
+            {totalRespondents > 0 ? Math.round((flatAnswers.length / (totalRespondents * questions.length)) * 100) : 0}%
           </div>
         </div>
         <div className="glass-card p-4">
@@ -406,25 +429,24 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
 
         {drillDownOpen && (
           <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-            {Array.from(new Set(responses.map(r => r.respondent_id))).map(respId => {
-              const respAnswers = getRespondentResponses(respId);
-              const isExpanded = expandedRespondent === respId;
-              const firstAnswer = respAnswers[0];
+            {dbResponses.map((resp) => {
+              const isExpanded = expandedRespondent === resp.respondent_token;
+              const submittedAt = resp.metadata?.submitted_at || resp.created_at;
 
               return (
-                <div key={respId} className="border border-white/30 rounded-xl overflow-hidden">
+                <div key={resp.respondent_token} className="border border-white/30 rounded-xl overflow-hidden">
                   <button 
-                    onClick={() => setExpandedRespondent(isExpanded ? null : respId)}
+                    onClick={() => setExpandedRespondent(isExpanded ? null : resp.respondent_token)}
                     className="w-full flex items-center justify-between p-3 hover:bg-white/40 transition text-left"
                   >
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                        <span className="text-xs font-bold">{respId.slice(0, 2).toUpperCase()}</span>
+                        <span className="text-xs font-bold">{resp.respondent_token.slice(0, 2).toUpperCase()}</span>
                       </div>
                       <div>
-                        <div className="text-sm font-medium">Respondent {respId.slice(-8)}</div>
+                        <div className="text-sm font-medium">Respondent {resp.respondent_token.slice(-8)}</div>
                         <div className="text-[10px] text-muted-foreground">
-                          {respAnswers.length} answers · {firstAnswer ? new Date(firstAnswer.created_at).toLocaleString() : ''}
+                          {Object.keys(resp.answers || {}).length} answers · {new Date(submittedAt).toLocaleString()}
                         </div>
                       </div>
                     </div>
@@ -434,13 +456,13 @@ export const ResponseAnalytics: React.FC<Props> = ({ survey, questions, onClose 
                   {isExpanded && (
                     <div className="p-3 pt-0 space-y-2">
                       {questions.map((q, i) => {
-                        const ans = respAnswers.find(r => r.question_id === q.id);
+                        const ans = resp.answers?.[q.id];
                         return (
                           <div key={q.id} className="flex gap-3 text-sm py-1 border-t border-white/20">
                             <span className="text-muted-foreground font-condensed w-8 shrink-0">Q{i + 1}</span>
                             <span className="flex-1 text-muted-foreground">{q.prompt}</span>
                             <span className="font-medium text-right max-w-[50%]">
-                              {ans ? (Array.isArray(ans.answer) ? ans.answer.join(', ') : String(ans.answer)) : <span className="text-muted-foreground italic">No answer</span>}
+                              {ans !== undefined ? (Array.isArray(ans) ? ans.join(', ') : String(ans)) : <span className="text-muted-foreground italic">No answer</span>}
                             </span>
                           </div>
                         );
