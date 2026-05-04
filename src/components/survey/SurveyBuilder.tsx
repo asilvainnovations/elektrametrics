@@ -1,10 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { ArrowLeft, ArrowRight, Sparkles, Plus, Loader2, Eye, Save, Wand2, Copy, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { 
+  ArrowLeft, ArrowRight, Sparkles, Plus, Loader2, Eye, Save, Wand2, 
+  Copy, ExternalLink, CheckCircle2, AlertTriangle, ShieldCheck, 
+  AlertCircle, XCircle, GitBranch, Wrench, BarChart3
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { QuestionEditor, Question } from './QuestionEditor';
+import { 
+  validateQuestionLogic, 
+  LogicError, 
+  autoFixErrors, 
+  hasBlockingErrors 
+} from './SurveyLogicValidator';
+import { ResponseAnalytics } from './ResponseAnalytics';
 
 interface Survey {
   id: string;
@@ -45,6 +56,7 @@ export const SurveyBuilder: React.FC<Props> = ({ survey, onClose }) => {
   const [aiLoading, setAiLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<Omit<Question, 'id' | 'position'>[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   const newId = () => `q_${Math.random().toString(36).slice(2, 10)}`;
 
@@ -66,6 +78,10 @@ export const SurveyBuilder: React.FC<Props> = ({ survey, onClose }) => {
       setLoading(false);
     })();
   }, [survey.id]);
+
+  // Compute logic errors reactively
+  const logicErrors = useMemo(() => validateQuestionLogic(questions), [questions]);
+  const hasErrors = useMemo(() => hasBlockingErrors(logicErrors), [logicErrors]);
 
   const addQuestion = (template?: Omit<Question, 'id' | 'position'>) => {
     const base: Question = template
@@ -120,8 +136,35 @@ export const SurveyBuilder: React.FC<Props> = ({ survey, onClose }) => {
     toast({ title: 'Question added' });
   };
 
+  const handleAutoFix = useCallback(() => {
+    const fixed = autoFixErrors(questions, logicErrors);
+    setQuestions(fixed);
+    toast({ 
+      title: 'Logic errors fixed', 
+      description: `${logicErrors.length} issue${logicErrors.length === 1 ? '' : 's'} resolved automatically.` 
+    });
+  }, [questions, logicErrors]);
+
+  const handleFixError = useCallback((error: LogicError) => {
+    const fixed = autoFixErrors(questions, [error]);
+    setQuestions(fixed);
+    toast({ title: 'Issue fixed', description: error.message });
+  }, [questions]);
+
   const persist = async (newStatus?: 'draft' | 'active') => {
     if (!user) return;
+
+    // Block publishing if logic errors exist
+    if (newStatus === 'active' && hasErrors) {
+      toast({ 
+        title: 'Cannot publish', 
+        description: `Please fix ${logicErrors.length} logic error${logicErrors.length === 1 ? '' : 's'} before publishing.`, 
+        variant: 'destructive' 
+      });
+      setStep(3); // Jump to review step
+      return;
+    }
+
     setSaving(true);
     // Replace all questions: delete then insert (simple, atomic enough for small N)
     await supabase.from('survey_questions').delete().eq('survey_id', survey.id);
@@ -162,6 +205,10 @@ export const SurveyBuilder: React.FC<Props> = ({ survey, onClose }) => {
     return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   }
 
+  if (showAnalytics) {
+    return <ResponseAnalytics survey={survey} questions={questions} onClose={() => setShowAnalytics(false)} />;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -175,14 +222,43 @@ export const SurveyBuilder: React.FC<Props> = ({ survey, onClose }) => {
           </div>
         </div>
         <div className="flex gap-2">
+          {survey.status === 'active' && (
+            <Button variant="outline" onClick={() => setShowAnalytics(true)}>
+              <BarChart3 className="w-4 h-4 mr-2" />Analytics
+            </Button>
+          )}
           <Button variant="outline" onClick={() => persist()} disabled={saving}>
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Save className="w-4 h-4 mr-2" />Save Draft</>}
           </Button>
-          <Button onClick={() => persist('active')} disabled={saving || questions.length === 0} className="gradient-primary text-white border-0">
+          <Button 
+            onClick={() => persist('active')} 
+            disabled={saving || questions.length === 0 || (step === 3 && hasErrors)} 
+            className="gradient-primary text-white border-0"
+          >
             <Sparkles className="w-4 h-4 mr-2" />Publish
           </Button>
         </div>
       </div>
+
+      {/* Logic Error Banner - shown on all steps when errors exist */}
+      {hasErrors && (
+        <div className="glass-card p-4 border-l-4 border-l-rose-500 bg-rose-50/50">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="font-medium text-rose-700 text-sm">
+                {logicErrors.length} logic error{logicErrors.length === 1 ? '' : 's'} detected
+              </div>
+              <p className="text-xs text-rose-600 mt-0.5">
+                Publishing is blocked until all logic errors are resolved. Go to Review & Publish to see details.
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setStep(3)} className="text-rose-700 border-rose-300 hover:bg-rose-100">
+              Review Errors
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Stepper */}
       <div className="glass-card p-4">
@@ -342,6 +418,82 @@ export const SurveyBuilder: React.FC<Props> = ({ survey, onClose }) => {
 
       {step === 3 && (
         <div className="space-y-4">
+          {/* Logic Validation Checklist Panel */}
+          <div className={`glass-card p-5 ${hasErrors ? 'border-l-4 border-l-rose-500' : 'border-l-4 border-l-emerald-500'}`}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                {hasErrors ? (
+                  <XCircle className="w-5 h-5 text-rose-500" />
+                ) : (
+                  <ShieldCheck className="w-5 h-5 text-emerald-500" />
+                )}
+                <h2 className="font-display text-lg font-bold">
+                  Logic Validation {hasErrors ? `— ${logicErrors.length} Issue${logicErrors.length === 1 ? '' : 's'} Found` : '— All Clear'}
+                </h2>
+              </div>
+              {hasErrors && (
+                <Button size="sm" variant="outline" onClick={handleAutoFix} className="text-rose-700 border-rose-300 hover:bg-rose-100">
+                  <Wrench className="w-3.5 h-3.5 mr-1.5" />Auto-Fix All
+                </Button>
+              )}
+            </div>
+
+            {logicErrors.length > 0 ? (
+              <div className="space-y-2">
+                {logicErrors.map((error, idx) => (
+                  <div key={idx} className="flex items-start gap-3 p-3 rounded-xl bg-rose-50/50 border border-rose-200/40">
+                    <div className="shrink-0 mt-0.5">
+                      {error.type === 'circular' && <GitBranch className="w-4 h-4 text-rose-500" />}
+                      {error.type === 'unreachable' && <AlertCircle className="w-4 h-4 text-rose-500" />}
+                      {error.type === 'orphaned' && <AlertTriangle className="w-4 h-4 text-rose-500" />}
+                      {error.type === 'invalid_option' && <AlertTriangle className="w-4 h-4 text-orange-500" />}
+                      {error.type === 'missing_target' && <AlertCircle className="w-4 h-4 text-rose-500" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold uppercase font-condensed text-rose-700">{error.type.replace('_', ' ')}</span>
+                        <span className="text-[10px] text-muted-foreground">Q{error.questionIndex + 1}</span>
+                      </div>
+                      <p className="text-sm text-rose-700 mt-0.5">{error.message}</p>
+                    </div>
+                    {error.fixable && (
+                      <Button size="sm" variant="ghost" onClick={() => handleFixError(error)} className="shrink-0 text-rose-700 hover:bg-rose-100">
+                        <Wrench className="w-3.5 h-3.5 mr-1" />Fix
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50/50 border border-emerald-200/40">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                <div>
+                  <p className="text-sm font-medium text-emerald-700">No logic errors detected</p>
+                  <p className="text-xs text-emerald-600">All skip logic is valid. Your survey is ready to publish.</p>
+                </div>
+              </div>
+            )}
+
+            {/* Validation Checklist */}
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {[
+                { label: 'No orphaned references', check: !logicErrors.some(e => e.type === 'orphaned') },
+                { label: 'No circular dependencies', check: !logicErrors.some(e => e.type === 'circular') },
+                { label: 'All questions reachable', check: !logicErrors.some(e => e.type === 'unreachable') },
+                { label: 'Valid option references', check: !logicErrors.some(e => e.type === 'invalid_option') },
+                { label: 'At least 1 question', check: questions.length > 0 },
+                { label: 'All prompts filled', check: questions.every(q => q.prompt.trim().length > 0) },
+              ].map((item, i) => (
+                <div key={i} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium ${
+                  item.check ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/40' : 'bg-white/40 text-muted-foreground border border-white/30'
+                }`}>
+                  {item.check ? <CheckCircle2 className="w-3.5 h-3.5" /> : <div className="w-3.5 h-3.5 rounded-full border-2 border-current opacity-40" />}
+                  {item.label}
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div className="glass-card p-6">
             <h2 className="font-display text-xl font-bold mb-1 flex items-center gap-2">
               <Eye className="w-5 h-5 text-primary" />Review & Publish
@@ -368,7 +520,9 @@ export const SurveyBuilder: React.FC<Props> = ({ survey, onClose }) => {
 
             <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-2">
               {questions.map((q, i) => (
-                <div key={q.id} className="p-3 rounded-xl bg-white/40 border border-white/30">
+                <div key={q.id} className={`p-3 rounded-xl bg-white/40 border ${
+                  logicErrors.some(e => e.questionId === q.id) ? 'border-rose-300 bg-rose-50/30' : 'border-white/30'
+                }`}>
                   <div className="flex items-baseline gap-2 mb-1">
                     <span className="font-condensed font-bold text-sm text-muted-foreground">Q{i + 1}.</span>
                     <span className="text-sm font-medium flex-1">{q.prompt}{q.required && <span className="text-rose-500 ml-1">*</span>}</span>
@@ -378,7 +532,12 @@ export const SurveyBuilder: React.FC<Props> = ({ survey, onClose }) => {
                     <div className="ml-6 mt-1 text-xs text-muted-foreground">{q.options.join(' · ')}</div>
                   )}
                   {q.show_if && (
-                    <div className="ml-6 mt-1 text-[11px] text-orange-700 font-condensed">⤷ Shows only if Q{questions.findIndex(p => p.id === q.show_if!.question_id) + 1} = "{q.show_if.equals}"</div>
+                    <div className="ml-6 mt-1 text-[11px] text-orange-700 font-condensed">
+                      ⤷ Shows only if Q{questions.findIndex(p => p.id === q.show_if!.question_id) + 1} = "{q.show_if.equals}"
+                      {logicErrors.some(e => e.questionId === q.id && (e.type === 'orphaned' || e.type === 'unreachable')) && (
+                        <span className="text-rose-600 ml-2 font-bold">⚠ Invalid logic</span>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}
@@ -401,7 +560,12 @@ export const SurveyBuilder: React.FC<Props> = ({ survey, onClose }) => {
             <Button variant="outline" onClick={() => setStep(2)}><ArrowLeft className="w-4 h-4 mr-2" />Back</Button>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => persist()} disabled={saving}>Save as Draft</Button>
-              <Button onClick={() => persist('active')} disabled={saving || questions.length === 0} className="gradient-primary text-white border-0">
+              <Button 
+                onClick={() => persist('active')} 
+                disabled={saving || questions.length === 0 || hasErrors} 
+                className="gradient-primary text-white border-0"
+                title={hasErrors ? `Fix ${logicErrors.length} logic error(s) before publishing` : undefined}
+              >
                 <Sparkles className="w-4 h-4 mr-2" />Publish Survey
               </Button>
             </div>
