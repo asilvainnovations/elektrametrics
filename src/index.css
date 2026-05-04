@@ -1,0 +1,222 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Poppins:wght@300;400;500;600;700&family=Roboto+Condensed:wght@300;400;500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 224 76% 40%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 160 84% 31%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 19 91% 52%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 224 76% 40%;
+    --radius: 0.875rem;
+    --sidebar-background: 220 23% 97%;
+    --sidebar-foreground: 215 25% 27%;
+    --sidebar-primary: 224 76% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 92%;
+    --sidebar-accent-foreground: 215 25% 27%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 224 76% 40%;
+  }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 160 84% 39%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 217.2 32.6% 14%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 19 91% 55%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 40%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+    --sidebar-background: 222 47% 8%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 25% 14%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 215 25% 14%;
+    --sidebar-ring: 217 91% 60%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-family: 'Poppins', system-ui, sans-serif;
+  }
+  h1, h2, h3, h4, h5, h6 { font-family: 'Montserrat', sans-serif; letter-spacing: -0.01em; }
+  .font-display { font-family: 'Montserrat', sans-serif; }
+  .font-condensed { font-family: 'Roboto Condensed', sans-serif; }
+}
+
+@layer components {
+  .glass {
+    @apply backdrop-blur-xl bg-white/60 dark:bg-white/5 border border-white/40 dark:border-white/10;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
+  }
+  .glass-strong {
+    @apply backdrop-blur-2xl bg-white/80 dark:bg-slate-900/70 border border-white/50 dark:border-white/10;
+    box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.12);
+  }
+  .glass-card {
+    @apply backdrop-blur-xl bg-white/70 dark:bg-slate-900/50 border border-white/50 dark:border-white/10 rounded-2xl;
+    box-shadow: 0 4px 24px 0 rgba(31, 38, 135, 0.06);
+  }
+  .gradient-primary {
+    background: linear-gradient(135deg, #1e40af 0%, #059669 100%);
+  }
+  .gradient-mesh {
+    background:
+      radial-gradient(at 20% 0%, hsla(224, 76%, 60%, 0.25) 0px, transparent 50%),
+      radial-gradient(at 80% 0%, hsla(160, 84%, 50%, 0.2) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsla(19, 91%, 60%, 0.15) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsla(224, 76%, 40%, 0.18) 0px, transparent 50%);
+  }
+  .text-gradient {
+    background: linear-gradient(135deg, #1e40af 0%, #059669 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.4); }
+  70% { box-shadow: 0 0 0 12px rgba(5, 150, 105, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0); }
+}
+.pulse-ring { animation: pulse-ring 2s infinite; }
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.animate-float { animation: float 4s ease-in-out infinite; }
+
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+/* ========================================
+    ENHANCED PLATFORM BADGE 
+   ======================================== */
+
+/* Primary Bolt Badge Selectors */
+#bolt-badge, 
+.bolt-badge,
+[data-bolt-badge],
+[id*="bolt"][id*="badge"],
+[class*="bolt"][class*="badge"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: -9999px !important;
+  top: -9999px !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
+/* Iframe-based badges */
+iframe[src*="bolt"],
+iframe[src*="badge"],
+iframe[title*="bolt"],
+iframe[title*="badge"],
+iframe[data-bolt],
+iframe.badge {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  height: 0 !important;
+  width: 0 !important;
+}
+
+/* Fixed position badges (common placement) */
+[style*="position: fixed"][style*="bottom"],
+[style*="position:fixed"][style*="bottom"],
+div[style*="z-index: 999"],
+div[style*="z-index:999"],
+div[style*="z-index: 9999"],
+a[href*="bolt.new"],
+a[href*="bolt.diy"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+/* Additional common badge patterns */
+[data-badge="bolt"],
+[data-platform="bolt"],
+[data-branding="bolt"],
+.platform-badge,
+.builder-badge,
+.powered-by-badge,
+[class*="made-in"],
+[class*="powered-by"],
+[class*="built-with"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Bottom-right corner elements (typical badge placement) */
+body > div:last-child[style*="position: fixed"],
+body > div:last-child[style*="position:fixed"],
+body > a:last-child[style*="position: fixed"],
+body > a:last-child[style*="position:fixed"] {
+  display: none !important;
+}
+
+/* SVG-based badges */
+svg[data-badge],
+svg[class*="badge"],
+svg[id*="badge"] {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+/* Watermark and attribution elements */
+[data-watermark],
+[data-attribution],
+.watermark,
+.attribution {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
